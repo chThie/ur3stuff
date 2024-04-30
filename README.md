@@ -10,8 +10,8 @@ Install paho to your user account
 OR via virtual environment (recommended). 
 
 ```
-virtualenv paho-mqtt
-source paho-mqtt/bin/activate
+python3 -m venv venv
+source venv/bin/activate
 pip install paho-mqtt
 ```
 
