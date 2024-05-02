@@ -1,4 +1,4 @@
-# ur3connect
+# ur3stuff
 
 ## Get started
 To run the code of this project you need to install the Eclipse paho mqtt client.
@@ -16,4 +16,51 @@ pip install paho-mqtt
 ```
 
 ## Documentation
-...will follow.
+
+### Usage
+
+#### Connect to robot
+
+```
+# Set host and port of mqtt broker
+broker = 'localhost'
+port = 1883
+
+# Create new client
+robot = UR3Robot(broker, port)
+
+# Start client thread for network traffic ("start sending commands and receiving data")
+robot.start()
+
+# ...work with the robot
+
+# Stop client thread for network traffic before closing the program
+robot.stop()
+```
+
+#### Listen for messages
+```
+# Subscribe to a topic
+topic = "ur3/get/val"
+robot.subscribe(topic)
+
+# Now it will listen for messages on this topic...
+```
+
+#### Call for position
+```
+# Call for pose
+robot.get_pose()
+
+# Call for joints
+robot.get_joints()
+```
+
+#### Moving the robot
+```
+# Move robo to a given pose with a given blending radius, velocity and acceleration
+robot.move_j_pose([0.21, -0.18, 0.50, 1.57, 0.13, 0.01], blend_radius=0.03, velocity=0.5, acceleration=0.2)
+
+# Move robo joints with a given blending radius, velocity and acceleration
+robot.move_j_joints([0.2, -0.2, 0.1, 0.50, 1, 1], blend_radius=0.03, velocity=0.5, acceleration=0.2)
+```
