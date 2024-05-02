@@ -56,7 +56,6 @@
          cmd_queue≔tmp_cmd_queue
          val_queue≔tmp_val_queue
          arg_queue≔tmp_arg_queue
- 
        If next_cmd≟"movePos":
          position=to_num(next_val)
          isMoving≔True
