@@ -1,0 +1,204 @@
+import logging
+import math
+import time
+
+from paho.mqtt import client as mqtt_client
+
+# Parameters concerning reconnection behaviour
+FIRST_RECONNECT_DELAY = 1
+RECONNECT_RATE = 2
+MAX_RECONNECT_COUNT = 12
+MAX_RECONNECT_DELAY = 60
+
+
+class UR3Robot(object):
+
+    def __init__(self, broker, port, cmd_topic="ur3/set/cmd"):
+
+        # Hostname of broker (e.g. "urpi.local")
+        self.broker = broker
+        # Port of broker (default: 1883)
+        self.port = port
+
+        # Credentials if needed
+        # self.username = 'emqx'
+        # self.password = 'public'
+
+        # Topic where commands are published
+        self.cmd_topic = cmd_topic
+        # Global variable to store latest position vector of robot (x,y,z,ax,ay,az)
+        self.last_pose = None
+        # Global variable to store latest joints vector of robot (j1,j2,j3,j4,j5,j6)
+        self.last_joints = None
+
+        # MQTT client to subscribe and publish to
+        self.client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
+
+        def on_connect(client, userdata, flags, rc, properties):
+            if rc == 0:
+                print("Connected to MQTT Broker!")
+            else:
+                print("Failed to connect, return code %d\n", rc)
+
+        def on_disconnect(client, userdata, rc):
+            logging.info("Disconnected with result code: %s", rc)
+            reconnect_count, reconnect_delay = 0, FIRST_RECONNECT_DELAY
+            while reconnect_count < MAX_RECONNECT_COUNT:
+                logging.info("Reconnecting in %d seconds...", reconnect_delay)
+                time.sleep(reconnect_delay)
+
+                try:
+                    client.reconnect()
+                    logging.info("Reconnected successfully!")
+                    return
+                except Exception as err:
+                    logging.error("%s. Reconnect failed. Retrying...", err)
+
+                reconnect_delay *= RECONNECT_RATE
+                reconnect_delay = min(reconnect_delay, MAX_RECONNECT_DELAY)
+                reconnect_count += 1
+            logging.info("Reconnect failed after %s attempts. Exiting...", reconnect_count)
+
+        # client.username_pw_set(self.username, self.password)
+        self.client.on_connect = on_connect
+        self.client.connect(self.broker, self.port)
+        self.client.on_disconnect = on_disconnect
+
+    def start(self):
+        self.client.loop_start()
+
+    def stop(self):
+        self.client.loop_stop()
+
+    def publish(self, msg: str, topic: str):
+        """
+        Publish message on given topic to MQTT broker
+        """
+        result = self.client.publish(topic, msg)
+        # use blocking request to remain the order for now
+        result.wait_for_publish(timeout=1.0)
+        status = result[0]
+        if status == 0:
+            print(f"Send `{msg}` to topic `{topic}`")
+        else:
+            print(f"Failed to send message to topic {topic}")
+
+    def subscribe(self, topic):
+        """
+        Subscribe to given topic on MQTT broker
+        """
+        self.client.subscribe(topic)
+
+        def on_message(client, userdata, msg):
+            """
+            Callback function if client receives a message from MQTT broker
+            Function where returned position data can be handled
+            """
+            print(f"{str.upper(msg.topic)}:")
+            self._handle_incoming_val(client, userdata, msg)
+
+        self.client.on_message = on_message
+
+    def _handle_incoming_val(self, client, userdata, msg):
+        # Decode payload from received message
+        decoded_payload = msg.payload.decode()
+
+        # "Type check"
+        if "joints" in decoded_payload:
+            # Extract float values from joints string
+            # (e.g. from [0.1, -0.2, 0.1, 1.2, -1.3, 1.1] to x=0.1 y=-0.2, ...)
+            j1, j2, j3, j4, j5, j6 = [float(b) for b in decoded_payload.split(":")[1][2:-1].split(", ")]
+            print(f"Received joints: j1={j1}, j2={j2}, j3={j3}, j4={j4}, j5={j5}, j6={j6}")
+            self.last_joints = [j1, j2, j3, j4, j5, j6]
+        elif "pose" in decoded_payload:
+            # Extract float values from pose string
+            # (e.g. from p[0.1, -0.2, 0.1, 1.2, -1.3, 1.1] to x=0.1 y=-0.2, ...)
+            x, y, z, ax, ay, az = [float(b) for b in decoded_payload.split(":")[1][2:-1].split(", ")]
+            print(f"Received position: x={x}, y={y}, z={z}, ax={ax}, ay={ay}, az={az}")
+            self.last_position = [x, y, z, ax, ay, az]
+        else:
+            print(f"??? Received {msg.payload.decode()}")
+
+    def move_pos(self, pos):
+        """
+        Move robo arm to pre-programmed position
+        """
+        self.publish(f"movePos:{pos}", self.cmd_topic)
+
+    def get_pose(self):
+        """
+        Get position vector of robo arm
+        """
+        self.publish(f"getPose:", self.cmd_topic)
+
+    def get_joints(self):
+        """
+        Get joint positions of robo arm
+        """
+        self.publish(f"getJoints:", self.cmd_topic)
+
+    def move_j_pose(self, pose, velocity=1.0, acceleration=1.0, blend_radius=None, time=None):
+        """
+        Move robo arm to given position (Pose)
+        """
+        # Send velocity and acceleration
+        self.publish(f"vel:{velocity}", self.cmd_topic)
+        self.publish(f"acc:{acceleration}", self.cmd_topic)
+
+        # Send position
+        self.publish(f"x:{pose[0]}", self.cmd_topic)
+        self.publish(f"y:{pose[1]}", self.cmd_topic)
+        self.publish(f"z:{pose[2]}", self.cmd_topic)
+
+        # Send orientation
+        self.publish(f"ax:{pose[3]}", self.cmd_topic)
+        self.publish(f"ay:{pose[4]}", self.cmd_topic)
+        self.publish(f"az:{pose[5]}", self.cmd_topic)
+
+        # If move should be blended into the next one, send blend radius
+        if blend_radius:
+            self.publish(f"blend:{blend_radius}", self.cmd_topic)
+
+        # If move should take a certain time, send time
+        if time:
+            self.publish(f"time:{time}", self.cmd_topic)
+
+        self.publish(
+            f"movejPose:{'blend' if blend_radius else ''}{',' if blend_radius and time else ''}{'time' if time else ''}",
+            self.cmd_topic)
+
+    def move_j_joints(self, joints, blend_radius=None, velocity=1.0, acceleration=1.0):
+        """
+        Move robo arm to given position (Joints)
+        """
+        # Send velocity and acceleration
+        self.publish(f"vel:{velocity}", self.cmd_topic)
+        self.publish(f"acc:{acceleration}", self.cmd_topic)
+
+        # Send joints
+        self.publish(f"j1:{joints[0]}", self.cmd_topic)
+        self.publish(f"j2:{joints[1]}", self.cmd_topic)
+        self.publish(f"j3:{joints[2]}", self.cmd_topic)
+        self.publish(f"j4:{joints[3]}", self.cmd_topic)
+        self.publish(f"j5:{joints[4]}", self.cmd_topic)
+        self.publish(f"j6:{joints[5]}", self.cmd_topic)
+
+        # If move should be blended into the next one, send blend radius
+        if blend_radius:
+            self.publish(f"blend:{blend_radius}", self.cmd_topic)
+
+        # If move should take a certain time, send time
+        if time:
+            self.publish(f"time:{time}", self.cmd_topic)
+
+        self.publish(
+            f"movejJoints:{'blend' if blend_radius else ''}{',' if blend_radius and time else ''}{'time' if time else ''}",
+            self.cmd_topic)
+
+    # untested
+    def pause(self):
+        self.publish(f"pause:", self.cmd_topic)
+
+    # untested
+    def continue_after_pause(self):
+        self.publish(f"continue:", self.cmd_topic)
