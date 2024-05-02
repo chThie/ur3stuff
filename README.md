@@ -17,6 +17,8 @@ pip install paho-mqtt
 
 ## Documentation
 
+For examples how to use the script also see [publisher.py](https://github.com/chThie/ur3stuff/blob/main/publisher.py) and [subscriber.py](https://github.com/chThie/ur3stuff/blob/main/subscriber.py).
+
 ### Usage
 
 #### Connect to robot
