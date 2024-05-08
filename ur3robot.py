@@ -148,6 +148,12 @@ class UR3Robot(object):
         """
         self.publish(f"getJoints:", self.cmd_topic)
 
+    def get_forces(self):
+        """
+        Get forces of robo arm
+        """
+        self.publish(f"getForces:", self.cmd_topic)
+
     def start_freedrive(self):
         """
         Start freedrive
