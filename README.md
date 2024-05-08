@@ -67,9 +67,6 @@ robot.get_forces()
 
 #### Moving the robot
 
-The movej commands are blocking, since they are designed to queue themselves behind currently running commands.  
-This will probably change depending on the needs of our application.
-
 ```
 # Move robo to a given pose with a given blending radius, velocity and acceleration
 robot.move_j_pose([0.21, -0.18, 0.50, 1.57, 0.13, 0.01], blend_radius=0.03, velocity=0.5, acceleration=0.2)
@@ -77,6 +74,9 @@ robot.move_j_pose([0.21, -0.18, 0.50, 1.57, 0.13, 0.01], blend_radius=0.03, velo
 # Move robo joints with a given blending radius, velocity and acceleration
 robot.move_j_joints([0.2, -0.2, 0.1, 0.50, 1, 1], blend_radius=0.03, velocity=0.5, acceleration=0.2)
 ```
+
+The movej commands are blocking, since they are designed to queue themselves behind currently running commands.  
+This will probably change depending on the needs of our application.
 
 #### Slowing down the robot
 
@@ -90,8 +90,6 @@ robot.reset_speed()
 
 #### Freedrive mode
 
-While freedrive mode is active, the movej commands won't work and raise an exception.
-
 ```
 # Start freedrive mode
 robot.start_freedrive()
@@ -99,3 +97,5 @@ robot.start_freedrive()
 # Stop freedrive mode
 robot.stop_freedrive()
 ```
+
+While freedrive mode is active, the movej commands won't work and raise an exception.
