@@ -1,6 +1,5 @@
 import logging
-import math
-import time
+import time as timelib
 
 from paho.mqtt import client as mqtt_client
 
@@ -21,8 +20,8 @@ class UR3Robot(object):
         self.port = port
 
         # Credentials if needed
-        # self.username = 'emqx'
-        # self.password = 'public'
+        # self.username = ''
+        # self.password = ''
 
         # Topic where commands are published
         self.cmd_topic = cmd_topic
@@ -30,6 +29,9 @@ class UR3Robot(object):
         self.last_pose = None
         # Global variable to store latest joints vector of robot (j1,j2,j3,j4,j5,j6)
         self.last_joints = None
+
+        self.moving = False
+        self.freedrive = False
 
         # MQTT client to subscribe and publish to
         self.client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
@@ -45,7 +47,7 @@ class UR3Robot(object):
             reconnect_count, reconnect_delay = 0, FIRST_RECONNECT_DELAY
             while reconnect_count < MAX_RECONNECT_COUNT:
                 logging.info("Reconnecting in %d seconds...", reconnect_delay)
-                time.sleep(reconnect_delay)
+                timelib.sleep(reconnect_delay)
 
                 try:
                     client.reconnect()
@@ -64,6 +66,9 @@ class UR3Robot(object):
         self.client.connect(self.broker, self.port)
         self.client.on_disconnect = on_disconnect
 
+        # Subscribe to the val topic to get return values
+        self.subscribe("ur3/get/val")
+
     def start(self):
         self.client.loop_start()
 
@@ -75,13 +80,8 @@ class UR3Robot(object):
         Publish message on given topic to MQTT broker
         """
         result = self.client.publish(topic, msg)
-        # use blocking request to remain the order for now
-        result.wait_for_publish(timeout=1.0)
-        status = result[0]
-        if status == 0:
-            print(f"Send `{msg}` to topic `{topic}`")
-        else:
-            print(f"Failed to send message to topic {topic}")
+        # blocking instead of async call ?
+        # -> result.wait_for_publish(timeout=1.0)
 
     def subscribe(self, topic):
         """
@@ -113,9 +113,20 @@ class UR3Robot(object):
         elif "pose" in decoded_payload:
             # Extract float values from pose string
             # (e.g. from p[0.1, -0.2, 0.1, 1.2, -1.3, 1.1] to x=0.1 y=-0.2, ...)
-            x, y, z, ax, ay, az = [float(b) for b in decoded_payload.split(":")[1][2:-1].split(", ")]
+            x, y, z, ax, ay, az = [float(b) for b in
+                                   decoded_payload.split(":")[1].split("[")[1].split("]")[0].split(", ")]
             print(f"Received position: x={x}, y={y}, z={z}, ax={ax}, ay={ay}, az={az}")
             self.last_position = [x, y, z, ax, ay, az]
+        elif "force" in decoded_payload:
+            # Extract float values from pose string
+            # (e.g. from p[0.1, -0.2, 0.1, 1.2, -1.3, 1.1] to x=0.1 y=-0.2, ...)
+            fx, fy, fz, tr_x, tr_y, tr_z = [float(b) for b in
+                                            decoded_payload.split(":")[1].split("[")[1].split("]")[0].split(", ")]
+            print(f"Received forces: Fx={fx}, Fy={fy}, Fz={fz}, TRx={tr_x}, TRy={tr_y}, TRz={tr_z}")
+            # self.last_force = [x, y, z, ax, ay, az]
+        elif "movejEnd" in decoded_payload:
+            # works with mqtt-ur3-bridge-rocpapsci1.urscript (main with added back channel)
+            self.moving = False
         else:
             print(f"??? Received {msg.payload.decode()}")
 
@@ -137,10 +148,27 @@ class UR3Robot(object):
         """
         self.publish(f"getJoints:", self.cmd_topic)
 
+    def start_freedrive(self):
+        """
+        Start freedrive
+        """
+        self.freedrive = True
+        self.publish(f"free:start", self.cmd_topic)
+
+    def stop_freedrive(self):
+        """
+        End freedrive
+        """
+        self.publish(f"free:end", self.cmd_topic)
+        self.freedrive = False
+
     def move_j_pose(self, pose, velocity=1.0, acceleration=1.0, blend_radius=None, time=None):
         """
         Move robo arm to given position (Pose)
         """
+        if self.freedrive:
+            raise Exception("Can't movej while freedrive mode is active.")
+
         # Send velocity and acceleration
         self.publish(f"vel:{velocity}", self.cmd_topic)
         self.publish(f"acc:{acceleration}", self.cmd_topic)
@@ -163,14 +191,22 @@ class UR3Robot(object):
         if time:
             self.publish(f"time:{time}", self.cmd_topic)
 
+        # Block until previous command is finished
+        while self.moving:
+            pass
+
+        self.moving = True
         self.publish(
             f"movejPose:{'blend' if blend_radius else ''}{',' if blend_radius and time else ''}{'time' if time else ''}",
             self.cmd_topic)
 
-    def move_j_joints(self, joints, blend_radius=None, velocity=1.0, acceleration=1.0):
+    def move_j_joints(self, joints, velocity=1.0, acceleration=1.0, blend_radius=None, time=None):
         """
         Move robo arm to given position (Joints)
         """
+        if self.freedrive:
+            raise Exception("Can't movej while freedrive mode is active.")
+
         # Send velocity and acceleration
         self.publish(f"vel:{velocity}", self.cmd_topic)
         self.publish(f"acc:{acceleration}", self.cmd_topic)
@@ -191,14 +227,23 @@ class UR3Robot(object):
         if time:
             self.publish(f"time:{time}", self.cmd_topic)
 
+        # Block until previous command is finished
+        while self.moving:
+            pass
+
+        self.moving = True
         self.publish(
             f"movejJoints:{'blend' if blend_radius else ''}{',' if blend_radius and time else ''}{'time' if time else ''}",
             self.cmd_topic)
 
-    # untested
-    def pause(self):
+    def reduce_speed(self):
+        """
+        Reduces every movement of the robot to 10 %
+        """
         self.publish(f"pause:", self.cmd_topic)
 
-    # untested
-    def continue_after_pause(self):
+    def reset_speed(self):
+        """
+        Resets the movement speed after reducing it
+        """
         self.publish(f"continue:", self.cmd_topic)

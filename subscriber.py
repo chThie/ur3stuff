@@ -15,12 +15,12 @@ def run():
     robot.start()
 
     # Subscribe to a topic
-    topic = "ur3/get/val"
+    topic = "ur3/return"
     robot.subscribe(topic)
 
     # Now it will listen for messages on this topic...
 
-    print("Starting to listen to {topic}:")
+    print(f"Starting to listen to {topic}:")
     input("Press any key to stop...")
 
     # Stop client thread for network traffic before closing the program

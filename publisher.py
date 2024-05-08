@@ -1,6 +1,7 @@
 from ur3robot import UR3Robot
 
-from tests import test_upright, test_box
+from tests import *
+
 
 def run():
     # Set host and port of mqtt broker
@@ -19,9 +20,10 @@ def run():
     # START of programming movements
 
     # Test to move robo to a given position with a given orientation, blending, velocity and acceleration
-    robot.move_j_pose([0.21, -0.18, 0.50, 1.57, 0.13, 0.01], blend_radius=0.03, velocity=0.5, acceleration=0.2)
+    # robot.move_j_pose([0.21, -0.18, 0.50, 1.57, 0.13, 0.01], blend_radius=0.03, velocity=0.5, acceleration=0.2)
 
-    test_box(robot)
+    # run test function
+    test_line(robot)
 
     # END of programming movements
     # ------------------------------
