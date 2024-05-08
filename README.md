@@ -2,18 +2,20 @@
 
 ## Get started
 
-To run the code of this project you need to install the Eclipse paho mqtt client.
+To run the code of this project you need to install the Eclipse paho mqtt client.  
+The required package is listed in a requirements file.
 
-Install paho to your user account
-
-```pip install paho-mqtt```
-
-OR via virtual environment (recommended).
+Install required packets via virtual environment (recommended):
 
 ```
 python3 -m venv venv
 source venv/bin/activate
-pip install paho-mqtt
+pip install -r requirements.txt
+```
+
+OR install the packets to your user account:
+```
+pip install -r requirements.txt
 ```
 
 ## Documentation
