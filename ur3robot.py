@@ -1,6 +1,5 @@
 import logging
 import time
-import time as timelib
 
 from paho.mqtt import client as mqtt_client
 
@@ -51,7 +50,7 @@ class UR3Robot(object):
             reconnect_count, reconnect_delay = 0, FIRST_RECONNECT_DELAY
             while reconnect_count < MAX_RECONNECT_COUNT:
                 logging.info("Reconnecting in %d seconds...", reconnect_delay)
-                timelib.sleep(reconnect_delay)
+                time.sleep(reconnect_delay)
 
                 try:
                     client.reconnect()
@@ -214,7 +213,7 @@ class UR3Robot(object):
         self.publish(f"free:end", self.cmd_topic)
         self.freedrive = False
 
-    def move_j_pose(self, pose, velocity=None, acceleration=None, blend_radius=None, time=None):
+    def move_j_pose(self, pose, velocity=None, acceleration=None, blend_radius=None, jtime=None):
         """
         Move robo arm to given position (Pose)
         """
@@ -242,14 +241,14 @@ class UR3Robot(object):
             self.publish(f"blend:{blend_radius}", self.cmd_topic)
 
         # If move should take a certain time, send time
-        if time:
-            self.publish(f"time:{time}", self.cmd_topic)
+        if jtime:
+            self.publish(f"time:{jtime}", self.cmd_topic)
 
         self.publish(
-            f"movejPose:{'blend' if blend_radius else ''}{',' if blend_radius and time else ''}{'time' if time else ''}",
+            f"movejPose:{'blend' if blend_radius else ''}{',' if blend_radius and jtime else ''}{'time' if jtime else ''}",
             self.cmd_topic)
 
-    def move_j_joints(self, joints, velocity=1.0, acceleration=1.0, blend_radius=None, time=None):
+    def move_j_joints(self, joints, velocity=1.0, acceleration=1.0, blend_radius=None, jtime=None):
         """
         Move robo arm to given position (Joints)
         """
@@ -273,11 +272,11 @@ class UR3Robot(object):
             self.publish(f"blend:{blend_radius}", self.cmd_topic)
 
         # If move should take a certain time, send time
-        if time:
-            self.publish(f"time:{time}", self.cmd_topic)
+        if jtime:
+            self.publish(f"time:{jtime}", self.cmd_topic)
 
         self.publish(
-            f"movejJoints:{'blend' if blend_radius else ''}{',' if blend_radius and time else ''}{'time' if time else ''}",
+            f"movejJoints:{'blend' if blend_radius else ''}{',' if blend_radius and jtime else ''}{'time' if jtime else ''}",
             self.cmd_topic)
 
     def reduce_speed(self):
