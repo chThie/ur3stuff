@@ -1,4 +1,5 @@
 import logging
+import time
 import time as timelib
 
 from paho.mqtt import client as mqtt_client
@@ -30,11 +31,14 @@ class UR3Robot(object):
         # Global variable to store latest joints vector of robot (j1,j2,j3,j4,j5,j6)
         self.last_joints = None
 
-        self.moving = False
         self.freedrive = False
 
         # MQTT client to subscribe and publish to
         self.client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
+
+        self.debug_timing = True
+        self.published_messages = dict()
+        self.received_returns = dict()
 
         def on_connect(client, userdata, flags, rc, properties):
             if rc == 0:
@@ -79,9 +83,18 @@ class UR3Robot(object):
         """
         Publish message on given topic to MQTT broker
         """
+        global published_messages, received_returns
+
         result = self.client.publish(topic, msg)
-        # blocking instead of async call ?
-        # -> result.wait_for_publish(timeout=1.0)
+
+        if self.debug_timing:
+            if self.published_messages.get(topic, None) is None:
+                self.published_messages[topic] = dict()
+
+            if self.published_messages[topic].get(result.mid, None):
+                raise Exception("Doubled message ID!")
+
+            self.published_messages[topic][result.mid] = (msg, time.time())
 
     def subscribe(self, topic):
         """
@@ -94,12 +107,48 @@ class UR3Robot(object):
             Callback function if client receives a message from MQTT broker
             Function where returned position data can be handled
             """
-            print(f"{str.upper(msg.topic)}:")
             self._handle_incoming_val(client, userdata, msg)
 
         self.client.on_message = on_message
 
+    def evaluate_timing(self):
+        if not self.debug_timing:
+            print("Timing debug is disabled. Set UR3Robot.debug_timing to True.")
+        else:
+            print("Timing evaluation")
+            print("-----------------")
+            timings = list()
+            for topic in self.published_messages:
+                print(f"Topic: {topic}")
+                print(f"Published messages: {len(self.published_messages[topic])}")
+                if self.received_returns.get(topic, None) is None:
+                    print(f"Received returns: 0")
+                    print("No timings, since no messages were received.")
+                else:
+                    print(f"Received returns: {len(self.received_returns[topic])}")
+                    print(f"Lost returns: {len(self.published_messages[topic]) - len(self.received_returns[topic])}")
+                    for mid in self.published_messages[topic]:
+                        message, timing = self.published_messages[topic][mid]
+                        r_message, r_timing = self.received_returns[topic].get(mid, (None, None))
+                        if r_message is not None:
+                            elapsed_time = r_timing - timing
+                            timings.append(elapsed_time)
+                    print(f"Average elapsed time: {round((sum(timings) / len(timings))*1000,1)} ms")
+                    print(f"Max elapsed time: {round((max(timings))*1000,1)} ms")
+                    print(f"Min elapsed time: {round((min(timings))*1000,1)} ms")
+                    print()
+
     def _handle_incoming_val(self, client, userdata, msg):
+
+        if self.debug_timing:
+            if self.received_returns.get(msg.topic, None) is None:
+                self.received_returns[msg.topic] = dict()
+
+            if self.received_returns[msg.topic].get(msg.mid, None):
+                raise Exception("Received double return!")
+
+            self.received_returns[msg.topic][msg.mid] = (msg, time.time())
+
         # Decode payload from received message
         decoded_payload = msg.payload.decode()
 
@@ -124,9 +173,6 @@ class UR3Robot(object):
                                             decoded_payload.split(":")[1].split("[")[1].split("]")[0].split(", ")]
             print(f"Received forces: Fx={fx}, Fy={fy}, Fz={fz}, TRx={tr_x}, TRy={tr_y}, TRz={tr_z}")
             # self.last_force = [x, y, z, ax, ay, az]
-        elif "movejEnd" in decoded_payload:
-            # works with mqtt-ur3-bridge-rocpapsci1.urscript (main with added back channel)
-            self.moving = False
         else:
             print(f"??? Received {msg.payload.decode()}")
 
@@ -168,7 +214,7 @@ class UR3Robot(object):
         self.publish(f"free:end", self.cmd_topic)
         self.freedrive = False
 
-    def move_j_pose(self, pose, velocity=1.0, acceleration=1.0, blend_radius=None, time=None):
+    def move_j_pose(self, pose, velocity=None, acceleration=None, blend_radius=None, time=None):
         """
         Move robo arm to given position (Pose)
         """
@@ -176,8 +222,10 @@ class UR3Robot(object):
             raise Exception("Can't movej while freedrive mode is active.")
 
         # Send velocity and acceleration
-        self.publish(f"vel:{velocity}", self.cmd_topic)
-        self.publish(f"acc:{acceleration}", self.cmd_topic)
+        if velocity:
+            self.publish(f"vel:{velocity}", self.cmd_topic)
+        if acceleration:
+            self.publish(f"acc:{acceleration}", self.cmd_topic)
 
         # Send position
         self.publish(f"x:{pose[0]}", self.cmd_topic)
@@ -197,11 +245,6 @@ class UR3Robot(object):
         if time:
             self.publish(f"time:{time}", self.cmd_topic)
 
-        # Block until previous command is finished
-        while self.moving:
-            pass
-
-        self.moving = True
         self.publish(
             f"movejPose:{'blend' if blend_radius else ''}{',' if blend_radius and time else ''}{'time' if time else ''}",
             self.cmd_topic)
@@ -233,11 +276,6 @@ class UR3Robot(object):
         if time:
             self.publish(f"time:{time}", self.cmd_topic)
 
-        # Block until previous command is finished
-        while self.moving:
-            pass
-
-        self.moving = True
         self.publish(
             f"movejJoints:{'blend' if blend_radius else ''}{',' if blend_radius and time else ''}{'time' if time else ''}",
             self.cmd_topic)
