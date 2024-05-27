@@ -12,6 +12,11 @@ from leap import datatypes as ldt
 import requests
 
 from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QGraphicsView, QGraphicsScene
+from PyQt5.QtGui import QColor, QBrush, QPen
+from PyQt5.QtCore import Qt
+
+from pygame import mixer
 
 from multiprocessing import Process
 
@@ -46,9 +51,9 @@ COMPUTER_GESTURES = ['Rock', 'Paper', 'Scissors']
 
 # Outcomes dictionary
 OUTCOMES = {
-    'Rock': {'Rock': 'It\'s a tie', 'Paper': 'Computer wins', 'Scissors': 'You win!'},
-    'Paper': {'Rock': 'You win!', 'Paper': 'It\'s a tie', 'Scissors': 'Computer wins'},
-    'Scissors': {'Rock': 'Computer wins', 'Paper': 'You win!', 'Scissors': 'It\'s a tie'}
+    'Rock': {'Rock': 'It\'s a tie', 'Paper': 'Robot wins', 'Scissors': 'You win!'},
+    'Paper': {'Rock': 'You win!', 'Paper': 'It\'s a tie', 'Scissors': 'Robot wins'},
+    'Scissors': {'Rock': 'Robot wins', 'Paper': 'You win!', 'Scissors': 'It\'s a tie'}
 }
 
 CURRENT_ARDUINO_GESTURE = ""
@@ -56,10 +61,10 @@ CURRENT_ARDUINO_GESTURE = ""
 TIME_BETWEEN_SENDING_MOVES = 0.5
 TIME_ROBOT_HAS_FOR_ONE_MOVE = 0.3
 
-POSITION = multiprocessing.Array("f",[-0.120587, -0.393911, 0.3, 0.232045, 2.11675, -2.084526])
+POSITION = multiprocessing.Array("f", [-0.120587, -0.393911, 0.3, 0.232045, 2.11675, -2.084526])
+MOVE = multiprocessing.Value("i", 1)
 
-
-
+TIME_BETWEEN_GAMES = 1
 # Function to get the location at the end of a finger
 def get_end_of_finger_location(hand: ldt.Hand, digit_index: int) -> ldt.Vector:
     digit = hand.digits[digit_index]
@@ -91,14 +96,14 @@ def recognize_hand_gesture(hand: ldt.Hand) -> str:
 # Function to send signal to specific URL based on computer gesture
 def send_signal(computer_gesture):
     global CURRENT_ARDUINO_GESTURE
-    if computer_gesture == CURRENT_ARDUINO_GESTURE:
-        # print(f"Hand already set to {computer_gesture}")
-        return
+    # if computer_gesture == CURRENT_ARDUINO_GESTURE and not computer_gesture == "Rock":
+    #     # print(f"Hand already set to {computer_gesture}")
+    #     return
     url = f"http://192.168.0.128/signal/{computer_gesture.lower()}"
     try:
         response = requests.get(url)
         if response.status_code == 200:
-            print(f"Successfully sent signal for {computer_gesture}")
+            # print(f"Successfully sent signal for {computer_gesture}")
             CURRENT_ARDUINO_GESTURE = computer_gesture
         else:
             print(f"Failed to send signal for {computer_gesture}: {response.status_code}")
@@ -137,9 +142,10 @@ class HandGestureListener(leap.Listener):
         for index, entry in enumerate(pos_tuple):
             self.global_position[index] = entry
 
-    def __init__(self, output_text, result_text, pumps, global_position):
+    def __init__(self, output_text, result_text, pumps, global_position, move):
         super().__init__()
         self.global_position = global_position
+        self.move = move
 
         self.output_text = output_text
         self.result_text = result_text
@@ -151,6 +157,7 @@ class HandGestureListener(leap.Listener):
         self.COMPUTER_WINS = 0
         self.PLAYER_WINS = 0
         self.output_text("Waiting")
+        self.completed_game_frame = 0
         send_signal("Rock")
 
         # Reset listener state
@@ -180,8 +187,16 @@ class HandGestureListener(leap.Listener):
         self.reset()
 
     def on_tracking_event(self, event):
-        #print("tracking")
+        # print("tracking")
         if event.tracking_frame_id % TRACKING_INTERVAL_FRAMES != 0:
+            return
+
+        if event.tracking_frame_id < self.completed_game_frame + (TIME_BETWEEN_GAMES*120) and self.completed_game_frame != 0:
+            # print(f"queued frame: {self.completed_game_frame-event.tracking_frame_id}")
+            return
+
+
+        if self.move == 0:
             return
 
         if not event.hands:
@@ -215,6 +230,7 @@ class HandGestureListener(leap.Listener):
                 if self.z_axis_state == DOWN and not self.counted and self.up_hit:
                     self.pump_count += 1
                     self.output_text(f"{self.pump_count}")
+
                     self.counted = True
                     self.up_hit = False
                 elif self.z_axis_state == UP and self.pump_count == 0:  # The first upswing
@@ -239,18 +255,30 @@ class HandGestureListener(leap.Listener):
                 else:
                     computer_gesture = random.choice(COMPUTER_GESTURES)
                 winner = OUTCOMES[player_gesture][computer_gesture]
-                self.output_text(f"You: {player_gesture}\nComputer: {computer_gesture}\n{winner}")
+                self.output_text(f"You: {player_gesture}\nRobot: {computer_gesture}\n\n{winner}")
                 self.update_scores(winner)
                 send_signal(computer_gesture)  # Send signal based on computer gesture
-                time.sleep(1)
                 self.soft_reset()
+                self.move.value = 0
+                self.completed_game_frame = event.tracking_frame_id
+                time.sleep(TIME_BETWEEN_GAMES)
+                self.move.value = 1
+
+    def play_sound(self, file):
+        mixer.init()
+        mixer.music.load(file)
+        mixer.music.play()
 
     def update_scores(self, winner):
         if winner == "You win!":
             self.PLAYER_WINS += 1
-        elif winner == "Computer wins":
+            self.play_sound("sounds/won.mp3")
+        elif winner == "Robot wins":
             self.COMPUTER_WINS += 1
-        self.result_text(f"Computer {self.COMPUTER_WINS} - {self.PLAYER_WINS} Player")
+            self.play_sound("sounds/lost.mp3")
+        else:
+            self.play_sound("sounds/tie.mp3")
+        self.result_text(f"Robot {self.COMPUTER_WINS} - {self.PLAYER_WINS} KISDies")
 
     def winning_move(self, move):
         if move == "Rock":
@@ -271,6 +299,7 @@ class HandGestureWindow(QWidget):
 
         layout = QVBoxLayout()
         layout.addWidget(self.output_label)
+        layout.addStretch()
         layout.addWidget(self.result_label)
         self.setLayout(layout)
         self.setGeometry(100, 100, 1000, 800)
@@ -283,12 +312,12 @@ class HandGestureWindow(QWidget):
         self.result_label.setText(text)
 
 
-def run_leap(global_position):
+def run_leap(global_position, move):
     app = QApplication(sys.argv)
     window = HandGestureWindow()
     window.show()
 
-    listener = HandGestureListener(window.update_output_text, window.update_result_text, window.pumps, global_position)
+    listener = HandGestureListener(window.update_output_text, window.update_result_text, window.pumps, global_position, move)
     connection = leap.Connection()
     connection.add_listener(listener)
 
@@ -315,16 +344,16 @@ def main():
 
     interpreter.movejJoints(-1.627241, -1.78029, -1.245485, -3.267259, -1.727941, -2.780924)
 
-
     interpreter.movejPose(tuple(POSITION))
 
-    leap_process = Process(target=run_leap, args=(POSITION,))  # Changed to use multiprocessing.Process
+    leap_process = Process(target=run_leap, args=(POSITION,MOVE,))  # Changed to use multiprocessing.Process
 
     leap_process.start()
 
     while True:
-        print("Main: ",tuple(POSITION))
-        interpreter.movejPose(tuple(POSITION))
+        # print("Main: ", tuple(POSITION))
+        if MOVE.value == 1:
+            interpreter.movejPose(tuple(POSITION))
         time.sleep(TIME_BETWEEN_SENDING_MOVES)
 
 
